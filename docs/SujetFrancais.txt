@@ -1,0 +1,75 @@
+
+Le protocole SURE
+
+Pour ce projet, vous allez écrire votre propre protocole de couche de transport qui effectue un transport de données fiable, appelé SURE.
+
+SURE est un protocole unidirectionnel (il y a un émetteur et un récepteur), il assure la livraison des messages applicatifs et il respecte leur ordre.
+
+Votre implémentation SURE doit utiliser le pipelining avec la stratégie Go-Back-N que nous avons étudiée en classe. Il doit également respecter l'interface spécifiée dans le fichier sure.h.
+
+
+
+Protocole UDT
+
+pour envoyer des paquets entre hôtes (données de l'expéditeur vers le destinataire et accusés de réception du destinataire vers l'expéditeur), le protocole SURE doit utiliser le protocole UDT, qui vous est déjà fourni (voir les fichiers disponibles sur Moodle).
+
+En réalité, UDT encapsule simplement la communication via UDP, ajoutant une certaine probabilité de perdre des paquets en cours de route.
+
+UDT fournit également un moyen de définir un délai d'attente pour les futurs appels udt_recv, ce qui sera utile pour SURE.
+
+Vous ne devez PAS modifier le protocole UDT, uniquement celui SURE.
+
+
+Applications
+
+Un exemple d'application (receive_file et copy_file) est fourni pour illustrer l'utilisation de SURE. Cet exemple d'application copie un fichier d'un hôte à un autre. N'hésitez pas à le modifier et/ou à créer d'autres applications pour tester votre protocole.
+
+
+AIDE
+
+Comment fonctionne SURE ?
+Voir les commentaires dans le fichier sure.c pour plus de détails.
+
+Fondamentalement, chaque côté a un thread qui s'exécutera pendant toute la durée de vie de la connexion et un tampon.
+
+Pour l'expéditeur :
+
+send_write ajoute des paquets au tampon tout en respectant la taille de paquet maximale, qui est limitée par la taille de paquet maximale UDT.
+send_write peut envoyer des paquets qui tombent dans la fenêtre actuelle.
+Le thread expéditeur recevra des accusés de réception du destinataire et supprimera les paquets du tampon une fois qu'ils auront été confirmés. Il gérera également les délais d'attente et les retransmissions. Tout cela est fait en respectant Go-Back-N.
+Démarrer une connexion signifie envoyer un paquet SYN spécial. Une fois que le thread reçoit l'accusé de réception de ce paquet, la connexion est établie.
+Mettre fin à la connexion signifie envoyer un paquet FIN spécial. Une fois que le thread reçoit l'accusé de réception pour ce paquet, la connexion est terminée. Si le paquet FIN expire un certain nombre de fois, l'expéditeur abandonne et met quand même fin à la connexion. Notez que le paquet FIN ne doit être envoyé qu'après l'envoi de toutes les données du tampon.
+Pour le récepteur :
+
+send_read supprime (éventuellement plusieurs) paquets du tampon et les renvoie à l'application, en respectant l'ordre.
+Le thread récepteur reçoit des paquets de l'expéditeur, ajoute des paquets au tampon, envoie des accusés de réception à l'expéditeur (tout en suivant Go-Back-N).
+Démarrer une connexion signifie recevoir le paquet SYN spécial.
+Mettre fin à la connexion signifie recevoir un paquet FIN, répondre par un accusé de réception, puis attendre un certain temps avant de couper la connexion (au cas où l'accusé de réception serait perdu et que l'expéditeur retransmettrait le FIN).
+
+
+À propos du format des paquets SURE
+Vous ajouterez toutes les informations que vous souhaitez envoyer avec les paquets SURE (par exemple, un numéro de séquence, des drapeaux) dans la structure sure_packet_t. Certaines choses à noter :
+
+Vous ne serez pas pénalisé pour une représentation sous-optimale des drapeaux, ce qui signifie qu'il est correct de déclarer chaque drapeau comme un booléen ou comme un entier court, par exemple, au lieu d'utiliser un seul bit pour chaque drapeau.
+
+Tous les paquets que vous envoyez avec SURE peuvent avoir la même taille, même si vous n'avez que quelques octets de données à envoyer (ou aucune donnée dans le cas d'un ACK). En d'autres termes, vous allez copier les données à envoyer dans le champ de données de la structure, définir un autre champ avec sa taille (afin que l'autre taille sache combien prendre du champ de données), et l'envoyer avec (évidemment vous 'll besoin de remplir le premier paramètre de la fonction udt_send et de tester sa valeur de retour):
+
+sure_packet_t pac;
+//fill pac
+udt_send(   , (char *)&pac, sizeof(sure_packet_t));
+And similarly for udt_recv.
+
+
+Accès simultanés
+
+De chaque côté, les deux threads (le thread d'application et l'autre thread créé lors de sure_init) partagent un certain nombre de variables (y compris le tampon). Cela signifie que ces accès doivent être protégés en utilisant un mutex (pthread_mutex_init, pthread_mutex_lock et pthread_mutex_unlock).
+
+De plus, dans certaines situations, un thread doit attendre qu'une condition soit rendue vraie par l'autre thread (attendre pendant que le tampon est vide/plein, jusqu'à ce qu'un paquet soit reçu, etc.). C'est un scénario "producteur-consommateur". La manière suggérée d'implémenter cela est par des variables de condition (pthread_cond_init, pthread_cond_wait et pthread_cond_signal). Voici un exemple de code producteur-consommateur en C utilisant pthread.
+
+
+
+Où chercher de l'aide
+
+Le livre "Computer Networks" de Tanenbaum, Feamster et Wetherall est une bonne source d'aide pour cette activité car ils présentent souvent des codes d'algorithmes, et en C. Dans ce livre, vous devriez le chercher au chapitre 3, qui traite de la couche de liaison de données. Comme nous en avons discuté en classe, les protocoles de couche liaison souhaitant fournir une transmission fiable le feront en utilisant les mêmes techniques que celles que nous avons étudiées dans la couche transport.
+
+Veuillez noter que je ne dis pas que vous trouverez un code prêt à l'emploi dans le livre, bien sûr, vous devrez adapter tout ce que vous trouverez. Il est également important de noter que si vous réutilisez des portions de code que vous trouvez dans des livres ou en ligne, ou si votre code est "fortement inspiré" par un autre code, vous devez l'expliquer explicitement dans votre rapport, sinon vous risquez un 0.
